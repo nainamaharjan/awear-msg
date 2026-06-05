@@ -1,135 +1,154 @@
-"""CLI entrypoint: argument parsing + one-shot command dispatch.
+"""CLI entry point: argument parsing and command dispatch.
 
-Launch string (spec/platform/python.md): `python -m client`.
-
-Execution model (control-interface.md §1): load state from `--store`, run exactly
-one command, persist, print exactly one JSON object as the final stdout line, exit
-0 on success / non-zero on failure. Any unhandled error is still reported as a
-structured `internal_error` rather than a crashing stack trace.
+Realizes the control interface (control-interface.md). Launch string:
+``python -m client`` (spec/platform/python.md). One command per process; the final
+line of stdout is exactly one JSON object; exit 0 on success, non-zero on failure.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
 import os
 import sys
+from typing import Any, Dict, List
 
-from . import store
-from .core import Client
-
-# Commands that require an established identity (control-interface.md §4).
-_NEEDS_IDENTITY = {"send", "flush", "poll", "set-online"}
-# Commands that contact the server and therefore need --server.
-_NEEDS_SERVER = {"login", "send", "flush", "poll", "set-online"}
+from . import protocol
+from .core import Client, NoIdentityError
+from .store import Store
 
 
-def _emit(payload, exit_code):
-    """Print the single final JSON line and exit."""
+def _emit(payload: Dict[str, Any], exit_code: int) -> None:
+    """Print the single JSON result line and exit with the given code."""
     print(json.dumps(payload))
     sys.exit(exit_code)
 
 
-def _fail(code, detail, exit_code=1):
+def _fail(code: str, detail: str, exit_code: int = 1) -> None:
     _emit({"ok": False, "error": code, "detail": detail}, exit_code)
 
 
-def _parse_bool(value):
-    low = str(value).strip().lower()
-    if low in ("true", "1", "yes", "on"):
-        return True
-    if low in ("false", "0", "no", "off"):
-        return False
-    raise ValueError(f"expected true/false, got {value!r}")
+def _received_view(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Project messages to the `received` shape (control-interface.md §4.4)."""
+    return [
+        {
+            "id": m["id"],
+            "from": m["from"],
+            "body": m["body"],
+            "delivery_seq": m["delivery_seq"],
+        }
+        for m in messages
+    ]
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="client", add_help=True)
     parser.add_argument("--server", default=os.environ.get("MSG_SERVER"))
     parser.add_argument("--store", default=os.environ.get("MSG_STORE"))
-    parser.add_argument("command")
-    parser.add_argument("args", nargs="*")
+
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("login").add_argument("name")
+
+    p_send = sub.add_parser("send")
+    p_send.add_argument("to")
+    p_send.add_argument("body")
+
+    sub.add_parser("flush")
+    sub.add_parser("poll")
+    sub.add_parser("set-online").add_argument("flag")
+    sub.add_parser("dump-state")
     return parser
 
 
-def dispatch(command, args, client):
+def _parse_bool(flag: str) -> bool:
+    value = flag.strip().lower()
+    if value in ("true", "1", "yes", "on"):
+        return True
+    if value in ("false", "0", "no", "off"):
+        return False
+    raise ValueError(f"expected true/false, got {flag!r}")
+
+
+def dispatch(args: argparse.Namespace) -> None:
+    if not args.store:
+        _fail("bad_args", "--store is required (or set MSG_STORE)", 2)
+
+    # dump-state is purely local and does not contact the server, so --server is
+    # optional for it only (control-interface.md §4.6). Every other command needs
+    # a server URL.
+    if args.command != "dump-state" and not args.server:
+        _fail("bad_args", "--server is required (or set MSG_SERVER)", 2)
+
+    store = Store(args.store)
+    server = protocol.Server(args.server) if args.server else None
+    client = Client(store, server)
+
+    command = args.command
+
     if command == "login":
-        if len(args) != 1:
-            return None, ("bad_args", "login requires exactly one argument: <name>")
-        return client.login(args[0]), None
+        name = client.login(args.name)
+        _emit({"ok": True, "user": name}, 0)
 
     if command == "send":
-        if len(args) != 2:
-            return None, ("bad_args", "send requires two arguments: <to> <body>")
-        return client.send(args[0], args[1]), None
+        msg_id, sent, remaining = client.send(args.to, args.body)
+        _emit({"ok": True, "id": msg_id, "sent": sent,
+               "queued_remaining": remaining}, 0)
 
     if command == "flush":
-        result = client.flush()
-        return {"ok": True, "flushed": result,
-                "remaining": len(client.state["outbox"])}, None
+        flushed = client.flush()
+        _emit({"ok": True, "flushed": flushed,
+               "remaining": len(store.outbox)}, 0)
 
     if command == "poll":
         received = client.poll()
-        return {"ok": True, "received": received,
-                "cursor": client.state["cursor"]}, None
+        _emit({"ok": True, "received": _received_view(received),
+               "cursor": store.cursor}, 0)
 
     if command == "set-online":
-        if len(args) != 1:
-            return None, ("bad_args", "set-online requires one argument: <true|false>")
         try:
-            value = _parse_bool(args[0])
+            online = _parse_bool(args.flag)
         except ValueError as exc:
-            return None, ("bad_args", str(exc))
-        return client.set_online(value), None
+            _fail("bad_args", str(exc), 2)
+        flushed, received = client.set_online(online)
+        _emit({"ok": True, "online": online, "flushed": flushed,
+               "received": _received_view(received)}, 0)
 
     if command == "dump-state":
-        return client.dump_state(), None
+        outbox_view = [
+            {"id": m["id"], "to": m["to"], "body": m["body"]}
+            for m in store.outbox
+        ]
+        _emit({
+            "ok": True,
+            "identity": store.identity,
+            "online": store.online,
+            "outbox": outbox_view,
+            "cursor": store.cursor,
+            "displayed_ids": list(store.displayed_ids),
+        }, 0)
 
-    return None, ("unknown_command", f"no such command: {command}")
+    # Unknown command should be impossible (argparse enforces choices).
+    _fail("bad_args", f"unknown command: {command}", 2)
 
 
-def main(argv=None):
+def main(argv: List[str] | None = None) -> None:
     parser = build_parser()
+    args = parser.parse_args(argv)
     try:
-        ns = parser.parse_args(argv)
+        dispatch(args)
     except SystemExit:
-        # argparse already wrote usage to stderr; emit a structured final line.
-        _fail("bad_args", "could not parse arguments", exit_code=2)
-
-    command = ns.command
-
-    if not ns.store:
-        _fail("no_store", "--store <path> is required (or set MSG_STORE)")
-
-    if command in _NEEDS_SERVER and not ns.server:
-        _fail("no_server", f"--server <url> is required for '{command}' (or set MSG_SERVER)")
-
-    try:
-        state = store.load(ns.store)
-    except (OSError, ValueError) as exc:
-        _fail("store_error", f"could not read store: {exc}")
-
-    # Identity precondition (control-interface.md §4).
-    if command in _NEEDS_IDENTITY and not state.get("identity"):
-        _fail("no_identity", f"'{command}' requires an established identity; run login first")
-
-    client = Client(state, ns.server)
-
-    try:
-        result, err = dispatch(command, ns.args, client)
-    except Exception as exc:  # noqa: BLE001 - last-resort structured failure
-        _fail("internal_error", f"{type(exc).__name__}: {exc}")
-
-    if err is not None:
-        code, detail = err
-        # No persistence on a usage error: state was not meaningfully changed.
-        _fail(code, detail)
-
-    # Persist all state changes before printing (control-interface.md §5).
-    try:
-        store.save(ns.store, client.state)
-    except OSError as exc:
-        _fail("store_error", f"could not write store: {exc}")
-
-    _emit(result, 0)
+        raise  # _emit/_fail already produced the structured line.
+    except NoIdentityError as exc:
+        _fail("no_identity", str(exc), 1)
+    except protocol.ProtocolError as exc:
+        # Server reachable but rejected the request (protocol.md §6).
+        _fail(exc.code, exc.detail, 1)
+    except protocol.NetworkError as exc:
+        # Should normally be caught and turned into an OFFLINE transition inside
+        # core; surfacing here is a defensive backstop.
+        _fail("network_error", str(exc), 1)
+    except Exception as exc:  # noqa: BLE001 — control-interface.md §3 backstop.
+        _fail("internal_error", f"{type(exc).__name__}: {exc}", 1)
 
 
 if __name__ == "__main__":

@@ -1,173 +1,164 @@
-"""Client state machine: send / flush / poll / reconnect (behavior.md §3).
+"""Client core: the offline state machine (behavior.md §3).
 
-`Client` operates on an in-memory copy of the persisted state dict. Each control
-command mutates the state; the caller (`__main__`) persists once at the end of the
-command. Because each invocation runs exactly one command in its own process
-(control-interface.md §1), a single atomic save at the end preserves the no-loss
-invariant: either the whole command's effect is durable or none of it is. If the
-process dies after a successful POST but before the save, the message is still in
-the outbox and will be re-sent next run; the server dedups on `id` (protocol.md
-§4.2), so it is neither lost nor displayed twice.
+Wires together persistence (``store.Store``) and the wire protocol
+(``protocol.Server``) to implement send / flush / poll / reconnect with the
+guarantees from behavior.md §4: no loss, per-sender FIFO, exactly-once display,
+at-least-once on the wire.
 
-Connectivity is a persisted flag that gates all network I/O (behavior.md §2). A
-network error during any request flips the flag to OFFLINE.
+Each method returns plain data; turning that into the control-interface JSON is
+the job of ``__main__.py``.
 """
 
+from __future__ import annotations
+
 import uuid
-from datetime import datetime, timezone
+from typing import Any, Dict, List, Tuple
 
 from . import protocol
+from .store import Store
+
+
+class NoIdentityError(Exception):
+    """A command requiring identity was run before ``login`` (control-interface §4)."""
 
 
 class Client:
-    def __init__(self, state, server):
-        self.state = state
-        # protocol.md §1: base URL supplied at startup; tolerate a trailing slash.
-        self.server = server.rstrip("/") if server else server
+    def __init__(self, store: Store, server: protocol.Server):
+        self.store = store
+        self.server = server
 
-    # --- connectivity ----------------------------------------------------
-    @property
-    def online(self):
-        return bool(self.state["online"])
+    # --- helpers -----------------------------------------------------------
+    def _require_identity(self) -> str:
+        if not self.store.identity:
+            raise NoIdentityError("no identity established; run `login` first")
+        return self.store.identity
 
-    def _go_offline(self):
-        self.state["online"] = False
+    # --- commands ----------------------------------------------------------
+    def login(self, name: str) -> str:
+        """Set identity; if ONLINE, register with the server (control-interface §4.1).
 
-    # --- login (control-interface.md §4.1) -------------------------------
-    def login(self, name):
-        self.state["identity"] = name
-        if self.online:
+        Login is idempotent server-side (protocol.md §4.1). A network failure here
+        is not fatal: identity is local first, so we still persist it and fall to
+        OFFLINE, matching the "never block on connectivity" spirit of behavior.md.
+        """
+        self.store.identity = name
+        if self.store.online:
             try:
-                protocol.post_session(self.server, name)
-                # Any successful request implies ONLINE; nothing else to do.
+                self.server.login(name)
             except protocol.NetworkError:
-                self._go_offline()
-        return {"ok": True, "user": name}
+                self.store.online = False
+            # A ProtocolError on login (e.g. bad name) propagates: the server is
+            # reachable and actively rejecting, which the caller should surface.
+        self.store.save()
+        return name
 
-    # --- send (control-interface.md §4.2, behavior.md §3.1) --------------
-    def send(self, to, body):
+    def send(self, to: str, body: str) -> Tuple[str, bool, int]:
+        """Compose + enqueue, flushing if ONLINE (behavior.md §3.1).
+
+        Returns ``(id, sent, queued_remaining)``. ``send`` never blocks on or fails
+        due to connectivity: the message is persisted to the outbox first, so it is
+        never lost.
+        """
+        identity = self._require_identity()
         message = {
             "id": str(uuid.uuid4()),
-            "from": self.state["identity"],
+            "from": identity,
             "to": to,
             "body": body,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "sent_at": protocol.now_iso(),
         }
-        # Enqueue first — this is what guarantees no loss when offline.
-        self.state["outbox"].append(message)
+        # Persist to the outbox BEFORE any network I/O (behavior.md §3.1 step 2).
+        self.store.outbox.append(message)
+        self.store.save()
 
-        if self.online:
+        sent = False
+        if self.store.online:
             self.flush()
+            # `sent` is true iff this id is no longer queued, i.e. it reached the
+            # server in this call.
+            sent = not any(m["id"] == message["id"] for m in self.store.outbox)
 
-        still_queued = any(m["id"] == message["id"] for m in self.state["outbox"])
-        return {
-            "ok": True,
-            "id": message["id"],
-            "sent": not still_queued,
-            "queued_remaining": len(self.state["outbox"]),
-        }
+        return message["id"], sent, len(self.store.outbox)
 
-    # --- flush (control-interface.md §4.3, behavior.md §3.2) -------------
-    def flush(self):
-        """Drain the outbox oldest-first. Returns the count flushed this call."""
+    def flush(self) -> int:
+        """Drain the outbox oldest-first (behavior.md §3.2). Returns count flushed.
+
+        Stops at the first network error (transition to OFFLINE) or protocol error
+        (server reachable but rejecting). Resumable: later calls continue from the
+        oldest remaining message.
+        """
+        self._require_identity()
         flushed = 0
-        if not self.online:
-            # OFFLINE gates network I/O; nothing leaves the outbox.
-            return flushed
-
-        while self.state["outbox"]:
-            message = self.state["outbox"][0]
+        while self.store.outbox:
+            message = self.store.outbox[0]
             try:
-                status, payload = protocol.post_message(self.server, message)
+                self.server.send(message)
             except protocol.NetworkError:
-                # behavior.md §3.2 step 3: go OFFLINE and stop; order preserved.
-                self._go_offline()
-                break
-
-            ack = payload.get("status")
-            if status in (202, 200) and ack in ("accepted", "duplicate"):
-                # accepted or duplicate both mean "the server has it" -> drop it.
-                self.state["outbox"].pop(0)
-                flushed += 1
-            else:
-                # behavior.md §3.2 step 4: reachable but rejected. Keep the
-                # message, stay ONLINE, stop the flush. (Should not happen for
-                # well-formed messages.)
-                break
+                # Unreachable: stop, leave this and all later messages in order.
+                self.store.online = False
+                self.store.save()
+                return flushed
+            except protocol.ProtocolError:
+                # Reachable but rejected: do NOT drop the message, do NOT go
+                # offline. Surface by stopping the flush (behavior.md §3.2 step 4).
+                self.store.save()
+                raise
+            # 202 accepted or 200 duplicate: drop from outbox and persist, then
+            # continue to the next message.
+            self.store.online = True
+            self.store.outbox.pop(0)
+            self.store.save()
+            flushed += 1
         return flushed
 
-    # --- poll (control-interface.md §4.4, behavior.md §3.3) -------------
-    def poll(self):
-        """Fetch new messages, display (dedup), advance cursor.
+    def poll(self) -> List[Dict[str, Any]]:
+        """Fetch and display new messages (behavior.md §3.3).
 
-        Returns the list of newly displayed messages in delivery_seq order.
+        Returns the list of newly displayed messages in ``delivery_seq`` order.
+        Only runs while ONLINE; a network error transitions to OFFLINE.
         """
-        received = []
-        if not self.online:
-            return received  # poll only runs while ONLINE (behavior.md §3.3)
-
+        identity = self._require_identity()
+        if not self.store.online:
+            return []
         try:
-            status, payload = protocol.get_messages(
-                self.server, self.state["identity"], self.state["cursor"]
-            )
+            messages, cursor = self.server.fetch(identity, self.store.cursor)
         except protocol.NetworkError:
-            self._go_offline()
-            return received
+            self.store.online = False
+            self.store.save()
+            return []
 
-        if status != 200:
-            # Reachable but errored; leave cursor untouched and surface nothing.
-            return received
+        self.store.online = True
+        displayed = set(self.store.displayed_ids)
+        newly: List[Dict[str, Any]] = []
+        for msg in sorted(messages, key=lambda m: m["delivery_seq"]):
+            if msg["id"] not in displayed:
+                displayed.add(msg["id"])
+                self.store.displayed_ids.append(msg["id"])
+                newly.append(msg)
+        # Advance the cursor and persist cursor + displayed_ids together.
+        self.store.cursor = cursor
+        self.store.save()
+        return newly
 
-        displayed = set(self.state["displayed_ids"])
-        messages = sorted(
-            payload.get("messages", []), key=lambda m: m.get("delivery_seq", 0)
-        )
-        for m in messages:
-            mid = m.get("id")
-            if mid not in displayed:
-                received.append({
-                    "id": mid,
-                    "from": m.get("from"),
-                    "body": m.get("body"),
-                    "delivery_seq": m.get("delivery_seq"),
-                })
-                displayed.add(mid)
+    def set_online(self, online: bool) -> Tuple[int, List[Dict[str, Any]]]:
+        """Persist connectivity; on an OFFLINE->ONLINE transition, reconnect.
 
-        self.state["cursor"] = payload.get("cursor", self.state["cursor"])
-        self.state["displayed_ids"] = list(displayed)
-        return received
+        Reconnect is flush-then-poll (behavior.md §3.4). Idempotent: setting to a
+        value already held is a no-op and runs neither flush nor poll
+        (control-interface.md §4.5). Returns ``(flushed, received)``.
+        """
+        self._require_identity()
+        was_online = self.store.online
 
-    # --- set-online (control-interface.md §4.5, behavior.md §3.4) -------
-    def set_online(self, value):
-        was_online = self.online
-        self.state["online"] = value
-
-        flushed = 0
-        received = []
-        if value and not was_online:
-            # Genuine OFFLINE -> ONLINE transition: reconnect = flush then poll.
+        if online and not was_online:
+            # Actual OFFLINE -> ONLINE transition: reconnect.
+            self.store.online = True
+            self.store.save()
             flushed = self.flush()
             received = self.poll()
+            return flushed, received
 
-        return {
-            "ok": True,
-            # Report the actual flag: flush/poll may have flipped it back to
-            # OFFLINE if the server turned out to be unreachable.
-            "online": self.online,
-            "flushed": flushed,
-            "received": received,
-        }
-
-    # --- dump-state (control-interface.md §4.6) -------------------------
-    def dump_state(self):
-        return {
-            "ok": True,
-            "identity": self.state["identity"],
-            "online": self.online,
-            "outbox": [
-                {"id": m["id"], "to": m["to"], "body": m["body"]}
-                for m in self.state["outbox"]
-            ],
-            "cursor": self.state["cursor"],
-            "displayed_ids": list(self.state["displayed_ids"]),
-        }
+        # No transition (or going offline): just persist the flag.
+        self.store.online = online
+        self.store.save()
+        return 0, []

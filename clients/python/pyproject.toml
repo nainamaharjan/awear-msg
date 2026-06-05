@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "awear-msg-client"
-version = "0.1.0"
-description = "Local messaging app client (Python). Generated from spec/."
+name = "local-messaging-client"
+version = "1.0.0"
+description = "Dependency-free Python client for the local messaging protocol (spec-driven)."
 requires-python = ">=3.11"
-# No third-party runtime dependencies (spec/platform/python.md): stdlib only.
+# No runtime dependencies: standard library only (spec/platform/python.md).
 dependencies = []
 
 [tool.setuptools]

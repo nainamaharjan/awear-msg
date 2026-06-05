@@ -2,19 +2,19 @@
 /**
  * Persistent client state (behavior.md §1).
  *
- * The `--store` path is a single JSON file holding the entire client state. It
- * MUST survive process restart (this is the whole point of the offline outbox),
- * so writes are atomic: serialize to a temp file in the same directory, then
- * `rename` it over the target (spec/platform/typescript.md). `rename` is atomic
- * on POSIX and Windows, so a crash mid-write leaves the previous good file
- * intact.
+ * The `--store` path is a single JSON file holding the four pieces of state that
+ * MUST survive process restart, plus the persisted connectivity flag (the
+ * one-shot execution model means connectivity is state, not an in-memory flag —
+ * control-interface.md §1):
  *
- * State shape:
- *   identity      : string | null  -- logged-in user name
- *   online        : boolean        -- persisted connectivity flag (control-interface)
- *   outbox        : Message[]       -- composed-but-unacked messages, FIFO oldest-first
- *   cursor        : number          -- highest delivery_seq fetched + displayed
- *   displayed_ids : string[]        -- ids already shown to the user (display dedup)
+ *   identity      : string | null      logged-in user name
+ *   online        : boolean            persisted connectivity flag
+ *   outbox        : OutgoingMessage[]  composed-but-unacknowledged, FIFO oldest-first
+ *   cursor        : number             highest delivery_seq fetched/displayed
+ *   displayed_ids : string[]           ids already shown (display-dedup safety net)
+ *
+ * Saves are atomic (write a temp file in the same dir, then `rename`) so a crash
+ * mid-write cannot corrupt the store (spec/platform/typescript.md).
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -50,66 +50,77 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.defaultState = defaultState;
-exports.load = load;
-exports.save = save;
+exports.Store = void 0;
 const node_crypto_1 = require("node:crypto");
-const promises_1 = require("node:fs/promises");
+const fs = __importStar(require("node:fs/promises"));
 const path = __importStar(require("node:path"));
-function defaultState() {
-    return {
-        identity: null,
-        online: true, // a fresh client is ONLINE until told otherwise
-        outbox: [],
-        cursor: 0,
-        displayed_ids: [],
-    };
-}
-/** Load state from `path`, returning defaults if it does not exist yet. */
-async function load(storePath) {
-    const state = defaultState();
-    if (!storePath) {
-        return state;
+class Store {
+    path;
+    identity = null;
+    // Default connectivity is ONLINE: a fresh client assumes the server is
+    // reachable and discovers OFFLINE on the first network error (behavior.md §2).
+    // The scenario's first commands run online without an explicit set-online true.
+    online = true;
+    outbox = [];
+    cursor = 0;
+    displayed_ids = [];
+    constructor(storePath) {
+        this.path = storePath;
     }
-    let raw;
-    try {
-        raw = await (0, promises_1.readFile)(storePath, "utf-8");
-    }
-    catch (err) {
-        if (err.code === "ENOENT") {
-            return state; // no store yet -> defaults
-        }
-        throw err;
-    }
-    const data = JSON.parse(raw);
-    // Merge over defaults so a partial/older file still yields every key.
-    if (data && typeof data === "object") {
-        const mutable = state;
-        for (const key of Object.keys(state)) {
-            if (key in data) {
-                mutable[key] = data[key];
-            }
-        }
-    }
-    return state;
-}
-/** Atomically persist `state` to `path`. */
-async function save(storePath, state) {
-    const target = path.resolve(storePath);
-    const directory = path.dirname(target);
-    await (0, promises_1.mkdir)(directory, { recursive: true });
-    const tmp = path.join(directory, `.store-${process.pid}-${(0, node_crypto_1.randomBytes)(6).toString("hex")}.tmp`);
-    try {
-        await (0, promises_1.writeFile)(tmp, JSON.stringify(state), "utf-8");
-        await (0, promises_1.rename)(tmp, target);
-    }
-    catch (err) {
+    /** Load persisted state from `storePath`, or start fresh if it is absent. */
+    static async load(storePath) {
+        const store = new Store(storePath);
+        let raw;
         try {
-            await (0, promises_1.unlink)(tmp);
+            raw = await fs.readFile(storePath, "utf-8");
         }
         catch {
-            /* best-effort cleanup */
+            // A missing store is a fresh client.
+            return store;
         }
-        throw err;
+        try {
+            const data = JSON.parse(raw);
+            store.identity =
+                typeof data.identity === "string" ? data.identity : null;
+            store.online = data.online === undefined ? true : Boolean(data.online);
+            store.outbox = Array.isArray(data.outbox) ? data.outbox : [];
+            store.cursor = Number.isFinite(data.cursor) ? Number(data.cursor) : 0;
+            store.displayed_ids = Array.isArray(data.displayed_ids)
+                ? data.displayed_ids
+                : [];
+        }
+        catch {
+            // A corrupt store is treated as empty/fresh rather than crashing the
+            // command; the atomic writes below make corruption unlikely anyway.
+        }
+        return store;
+    }
+    /** Atomically persist the current state to `this.path`. */
+    async save() {
+        const data = {
+            identity: this.identity,
+            online: this.online,
+            outbox: this.outbox,
+            cursor: this.cursor,
+            displayed_ids: this.displayed_ids,
+        };
+        const dir = path.dirname(path.resolve(this.path));
+        await fs.mkdir(dir, { recursive: true });
+        const tmp = path.join(dir, `.store-${(0, node_crypto_1.randomBytes)(8).toString("hex")}.tmp`);
+        try {
+            await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf-8");
+            await fs.rename(tmp, this.path);
+        }
+        catch (err) {
+            // Best-effort cleanup of the temp file on any failure.
+            try {
+                await fs.unlink(tmp);
+            }
+            catch {
+                /* ignore */
+            }
+            throw err;
+        }
     }
 }
+exports.Store = Store;

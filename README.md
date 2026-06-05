@@ -45,9 +45,12 @@ python server/app.py --port 8000
 
 # 3. grade each client against the spec's conformance scenario
 pip install pyyaml
+
 ( cd clients/typescript && npm install && npm run build )
+
 python conformance/run.py --client "python -m client"  --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
+
 python conformance/run.py --client "node dist/cli.js"  --client-dir clients/typescript \
   --scenario spec/conformance/scenario_01.yaml
 ```
@@ -60,10 +63,14 @@ Delete the generated clients and rebuild them purely from the spec:
 
 ```bash
 rm -rf clients/python clients/typescript
+
 ./harness/generate.sh all
+
 ( cd clients/typescript && npm install && npm run build )
+
 python conformance/run.py --client "python -m client" --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
+
 python conformance/run.py --client "node dist/cli.js" --client-dir clients/typescript \
   --scenario spec/conformance/scenario_01.yaml
 ```
@@ -77,9 +84,13 @@ clients interoperate through the server (Python Alice ↔ TypeScript Bob):
 
 ```bash
 python server/app.py --port 8000 &
+
 ( cd clients/typescript && npm install && npm run build )
+
 pyalice() { env PYTHONPATH=clients/python python -m client --server http://localhost:8000 --store /tmp/alice.json "$@"; }
+
 tsbob()   { node clients/typescript/dist/cli.js --server http://localhost:8000 --store /tmp/bob.json "$@"; }
+
 rm -f /tmp/alice.json /tmp/bob.json
 
 pyalice login alice
@@ -130,7 +141,9 @@ esac
 
 ```bash
 ./harness/generate.sh swift
+
 ( cd clients/swift && swift build -c release )
+
 python conformance/run.py --client ".build/release/messaging-client" --client-dir clients/swift \
   --scenario spec/conformance/scenario_01.yaml
 ```
@@ -138,6 +151,7 @@ To run as a client:
 
 ```bash
 swiftcarol() { clients/swift/.build/release/messaging-client --server http://localhost:8000 --store /tmp/carol.json "$@"; }
+
 rm -f /tmp/carol.json
 ```
 

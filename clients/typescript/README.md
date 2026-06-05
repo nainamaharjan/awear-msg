@@ -1,90 +1,74 @@
 # TypeScript messaging client
 
-A spec-driven client for the local messaging app. Generated from `spec/`
-(`protocol.md`, `behavior.md`, `control-interface.md`, `spec/platform/typescript.md`).
+A spec-driven client for the local messaging app, generated from `spec/`. It
+implements the wire protocol (`spec/protocol.md`), the offline state machine
+(`spec/behavior.md`), and the control interface (`spec/control-interface.md`),
+following `spec/platform/typescript.md`.
+
+Zero third-party runtime dependencies: it uses only Node built-ins (global
+`fetch`, `node:crypto`, `node:fs/promises`, `node:util`). The only dev
+dependencies are `typescript` and the type-only `@types/node`.
 
 ## Requirements
 
-- Node.js 20+ (uses the built-in global `fetch`), TypeScript 5+.
-- **No third-party runtime dependencies** — Node standard library only. The only
-  dev dependencies are `typescript` and `@types/node` (type-only; ships no runtime
-  code).
+- Node.js 20+ (for built-in `fetch`)
+- npm
 
 ## Build
 
-From this directory (`clients/typescript/`):
-
-```bash
-npm install && npm run build
+```sh
+cd clients/typescript
+npm install
+npm run build      # runs tsc, emitting dist/
 ```
-
-This runs `tsc`, emitting JavaScript to `dist/`.
 
 ## Run
 
-The launch string is `node dist/cli.js`, invoked **one command per process**:
+Launch string (control-interface.md §2): `node dist/cli.js`.
 
-```bash
+```sh
 node dist/cli.js --server <url> --store <path> <command> [args...]
 ```
 
-- `--server <url>` — server base URL, e.g. `http://localhost:8000`
-  (optional only for `dump-state`).
-- `--store <path>` — this client's private JSON state file. Each user gets its
-  own store; different paths share no state.
-- Both may also come from `MSG_SERVER` / `MSG_STORE`; explicit flags win.
-
-Every invocation prints exactly one JSON object as the final line of stdout and
-exits `0` on success, non-zero on failure.
+`--server` / `--store` may also come from the `MSG_SERVER` / `MSG_STORE`
+environment variables; explicit flags win. `--server` is required for every
+command except `dump-state` (which is purely local).
 
 ### Commands
 
-| Command | Output (final stdout line) |
-|---------|----------------------------|
-| `login <name>` | `{"ok": true, "user": "<name>"}` |
-| `send <to> <body>` | `{"ok": true, "id": "<uuid>", "sent": <bool>, "queued_remaining": <int>}` |
-| `flush` | `{"ok": true, "flushed": <int>, "remaining": <int>}` |
-| `poll` | `{"ok": true, "received": [...], "cursor": <int>}` |
-| `set-online <true\|false>` | `{"ok": true, "online": <bool>, "flushed": <int>, "received": [...]}` |
-| `dump-state` | `{"ok": true, "identity": ..., "online": ..., "outbox": [...], "cursor": <int>, "displayed_ids": [...]}` |
+| Command                    | Output (final stdout line, JSON)                                         |
+|----------------------------|--------------------------------------------------------------------------|
+| `login <name>`             | `{"ok":true,"user":"<name>"}`                                            |
+| `send <to> <body>`         | `{"ok":true,"id":"<uuid>","sent":<bool>,"queued_remaining":<int>}`      |
+| `flush`                    | `{"ok":true,"flushed":<int>,"remaining":<int>}`                         |
+| `poll`                     | `{"ok":true,"received":[{id,from,body,delivery_seq}...],"cursor":<int>}` |
+| `set-online <true\|false>` | `{"ok":true,"online":<bool>,"flushed":<int>,"received":[...]}`          |
+| `dump-state`               | `{"ok":true,"identity",...,"outbox","cursor","displayed_ids"}`          |
 
-Errors produce `{"ok": false, "error": "<code>", "detail": "<text>"}` and a
-non-zero exit code.
+Each invocation runs exactly one command, persists state to `--store` (an atomic
+JSON file), prints exactly one JSON object as the final stdout line, and exits
+`0` on success or non-zero on failure.
 
-## Example
+### Example session
 
-```bash
-# from the repo root, start the server:
-python server/app.py --port 8000 &
+```sh
+# Terminal 1: start the server
+python server/app.py --port 8000
 
-cd clients/typescript
-npm install && npm run build
+# Terminal 2: drive the client
 node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json login alice
-node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json send bob "hi"
-
-# go offline, queue a message, then reconnect (flush + poll):
+node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json send bob "hello"
 node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json set-online false
 node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json send bob "queued while offline"
-node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json set-online true
-```
-
-## Layout
-
-```
-src/cli.ts        # arg parsing + one-shot command dispatch (async main)
-src/protocol.ts   # fetch calls + message (de)serialization
-src/store.ts      # persistent JSON state, atomic writes
-src/core.ts       # send/flush/poll/reconnect state machine
-package.json      # build script; no runtime deps
-tsconfig.json
+node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json set-online true   # flush, then poll
+node dist/cli.js --server http://localhost:8000 --store /tmp/alice.json dump-state
 ```
 
 ## Conformance
 
-From the repo root (the harness needs PyYAML; the client and server stay
-dependency-free):
-
-```bash
-python conformance/run.py --client "node dist/cli.js" \
-    --client-dir clients/typescript --scenario spec/conformance/scenario_01.yaml
+```sh
+pip install pyyaml
+python conformance/run.py \
+  --client "node dist/cli.js" --client-dir clients/typescript \
+  --scenario spec/conformance/scenario_01.yaml
 ```

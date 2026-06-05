@@ -1,230 +1,207 @@
 "use strict";
 /**
- * Client state machine: send / flush / poll / reconnect (behavior.md §3).
+ * Client core: the offline state machine (behavior.md §3).
  *
- * `Client` operates on an in-memory copy of the persisted state object. Each
- * control command mutates the state; the caller (`cli.ts`) persists once at the
- * end of the command. Because each invocation runs exactly one command in its
- * own process (control-interface.md §1), a single atomic save at the end
- * preserves the no-loss invariant: either the whole command's effect is durable
- * or none of it is. If the process dies after a successful POST but before the
- * save, the message is still in the outbox and will be re-sent next run; the
- * server dedups on `id` (protocol.md §4.2), so it is neither lost nor displayed
- * twice.
+ * Wires together persistence (`Store`) and the wire protocol (`Server`) to
+ * implement send / flush / poll / reconnect with the guarantees from
+ * behavior.md §4: no loss, per-sender FIFO, exactly-once display, at-least-once
+ * on the wire.
  *
- * Connectivity is a persisted flag that gates all network I/O (behavior.md §2).
- * A network error during any request flips the flag to OFFLINE.
+ * Each method returns plain data; turning that into the control-interface JSON
+ * is the job of `cli.ts`.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Client = void 0;
+exports.Client = exports.NoIdentityError = void 0;
 const node_crypto_1 = require("node:crypto");
-const protocol = __importStar(require("./protocol"));
+const protocol_1 = require("./protocol");
+/** A command requiring identity was run before `login` (control-interface §4). */
+class NoIdentityError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "NoIdentityError";
+    }
+}
+exports.NoIdentityError = NoIdentityError;
 class Client {
-    state;
+    store;
     server;
-    constructor(state, server) {
-        this.state = state;
-        // protocol.md §1: base URL supplied at startup; tolerate a trailing slash.
-        this.server = server ? server.replace(/\/+$/, "") : server;
+    constructor(store, server) {
+        this.store = store;
+        this.server = server;
     }
-    // --- connectivity ----------------------------------------------------
-    get online() {
-        return Boolean(this.state.online);
+    // --- helpers ------------------------------------------------------------
+    requireIdentity() {
+        if (!this.store.identity) {
+            throw new NoIdentityError("no identity established; run `login` first");
+        }
+        return this.store.identity;
     }
-    goOffline() {
-        this.state.online = false;
+    requireServer() {
+        if (!this.server) {
+            // Guarded by cli.ts (every command except dump-state requires --server).
+            throw new Error("server URL is required for this command");
+        }
+        return this.server;
     }
-    // --- login (control-interface.md §4.1) -------------------------------
+    // --- commands -----------------------------------------------------------
+    /**
+     * Set identity; if ONLINE, register with the server (control-interface §4.1).
+     *
+     * Login is idempotent server-side (protocol.md §4.1). A network failure here
+     * is not fatal: identity is local first, so we still persist it and fall to
+     * OFFLINE, matching the "never block on connectivity" spirit of behavior.md.
+     */
     async login(name) {
-        this.state.identity = name;
-        if (this.online) {
+        this.store.identity = name;
+        if (this.store.online) {
             try {
-                await protocol.postSession(this.server, name);
-                // Any successful request implies ONLINE; nothing else to do.
+                await this.requireServer().login(name);
             }
             catch (err) {
-                if (err instanceof protocol.NetworkError) {
-                    this.goOffline();
+                if (err instanceof protocol_1.NetworkError) {
+                    this.store.online = false;
                 }
                 else {
+                    // A ProtocolError on login (e.g. bad name) propagates: the server is
+                    // reachable and actively rejecting, which the caller should surface.
                     throw err;
                 }
             }
         }
-        return { ok: true, user: name };
+        await this.store.save();
+        return name;
     }
-    // --- send (control-interface.md §4.2, behavior.md §3.1) --------------
+    /**
+     * Compose + enqueue, flushing if ONLINE (behavior.md §3.1).
+     *
+     * Returns `[id, sent, queuedRemaining]`. `send` never blocks on or fails due
+     * to connectivity: the message is persisted to the outbox first, so it is
+     * never lost.
+     */
     async send(to, body) {
+        const identity = this.requireIdentity();
         const message = {
             id: (0, node_crypto_1.randomUUID)(),
-            from: this.state.identity,
+            from: identity,
             to,
             body,
-            sent_at: new Date().toISOString(),
+            sent_at: (0, protocol_1.nowIso)(),
         };
-        // Enqueue first — this is what guarantees no loss when offline.
-        this.state.outbox.push(message);
-        if (this.online) {
+        // Persist to the outbox BEFORE any network I/O (behavior.md §3.1 step 2).
+        this.store.outbox.push(message);
+        await this.store.save();
+        let sent = false;
+        if (this.store.online) {
             await this.flush();
+            // `sent` is true iff this id is no longer queued, i.e. it reached the
+            // server in this call.
+            sent = !this.store.outbox.some((m) => m.id === message.id);
         }
-        const stillQueued = this.state.outbox.some((m) => m.id === message.id);
-        return {
-            ok: true,
-            id: message.id,
-            sent: !stillQueued,
-            queued_remaining: this.state.outbox.length,
-        };
+        return [message.id, sent, this.store.outbox.length];
     }
-    // --- flush (control-interface.md §4.3, behavior.md §3.2) -------------
-    /** Drain the outbox oldest-first. Returns the count flushed this call. */
+    /**
+     * Drain the outbox oldest-first (behavior.md §3.2). Returns count flushed.
+     *
+     * Stops at the first network error (transition to OFFLINE) or protocol error
+     * (server reachable but rejecting). Resumable: later calls continue from the
+     * oldest remaining message.
+     */
     async flush() {
+        this.requireIdentity();
+        const server = this.requireServer();
         let flushed = 0;
-        if (!this.online) {
-            // OFFLINE gates network I/O; nothing leaves the outbox.
-            return flushed;
-        }
-        while (this.state.outbox.length > 0) {
-            const message = this.state.outbox[0];
-            let result;
+        while (this.store.outbox.length > 0) {
+            const message = this.store.outbox[0];
             try {
-                result = await protocol.postMessage(this.server, message);
+                await server.send(message);
             }
             catch (err) {
-                if (err instanceof protocol.NetworkError) {
-                    // behavior.md §3.2 step 3: go OFFLINE and stop; order preserved.
-                    this.goOffline();
-                    break;
+                if (err instanceof protocol_1.NetworkError) {
+                    // Unreachable: stop, leave this and all later messages in order.
+                    this.store.online = false;
+                    await this.store.save();
+                    return flushed;
+                }
+                if (err instanceof protocol_1.ProtocolError) {
+                    // Reachable but rejected: do NOT drop the message, do NOT go offline.
+                    // Surface by stopping the flush (behavior.md §3.2 step 4).
+                    await this.store.save();
+                    throw err;
                 }
                 throw err;
             }
-            const ack = result.payload.status;
-            if ((result.status === 202 || result.status === 200) &&
-                (ack === "accepted" || ack === "duplicate")) {
-                // accepted or duplicate both mean "the server has it" -> drop it.
-                this.state.outbox.shift();
-                flushed += 1;
-            }
-            else {
-                // behavior.md §3.2 step 4: reachable but rejected. Keep the message,
-                // stay ONLINE, stop the flush. (Should not happen for well-formed
-                // messages.)
-                break;
-            }
+            // 202 accepted or 200 duplicate: drop from outbox and persist, then
+            // continue to the next message.
+            this.store.online = true;
+            this.store.outbox.shift();
+            await this.store.save();
+            flushed += 1;
         }
         return flushed;
     }
-    // --- poll (control-interface.md §4.4, behavior.md §3.3) -------------
     /**
-     * Fetch new messages, display (dedup), advance cursor.
-     * Returns the list of newly displayed messages in delivery_seq order.
+     * Fetch and display new messages (behavior.md §3.3).
+     *
+     * Returns the list of newly displayed messages in `delivery_seq` order. Only
+     * runs while ONLINE; a network error transitions to OFFLINE.
      */
     async poll() {
-        const received = [];
-        if (!this.online) {
-            return received; // poll only runs while ONLINE (behavior.md §3.3)
+        const identity = this.requireIdentity();
+        if (!this.store.online) {
+            return [];
         }
-        let result;
+        const server = this.requireServer();
+        let messages;
+        let cursor;
         try {
-            result = await protocol.getMessages(this.server, this.state.identity, this.state.cursor);
+            [messages, cursor] = await server.fetchMessages(identity, this.store.cursor);
         }
         catch (err) {
-            if (err instanceof protocol.NetworkError) {
-                this.goOffline();
-                return received;
+            if (err instanceof protocol_1.NetworkError) {
+                this.store.online = false;
+                await this.store.save();
+                return [];
             }
             throw err;
         }
-        if (result.status !== 200) {
-            // Reachable but errored; leave cursor untouched and surface nothing.
-            return received;
-        }
-        const displayed = new Set(this.state.displayed_ids);
-        const messages = (result.payload.messages ?? [])
-            .slice()
-            .sort((a, b) => (a.delivery_seq ?? 0) - (b.delivery_seq ?? 0));
-        for (const m of messages) {
-            const mid = m.id;
-            if (!displayed.has(mid)) {
-                received.push({
-                    id: mid,
-                    from: m.from,
-                    body: m.body,
-                    delivery_seq: m.delivery_seq,
-                });
-                displayed.add(mid);
+        this.store.online = true;
+        const displayed = new Set(this.store.displayed_ids);
+        const newly = [];
+        const ordered = [...messages].sort((a, b) => a.delivery_seq - b.delivery_seq);
+        for (const msg of ordered) {
+            if (!displayed.has(msg.id)) {
+                displayed.add(msg.id);
+                this.store.displayed_ids.push(msg.id);
+                newly.push(msg);
             }
         }
-        this.state.cursor = result.payload.cursor ?? this.state.cursor;
-        this.state.displayed_ids = Array.from(displayed);
-        return received;
+        // Advance the cursor and persist cursor + displayed_ids together.
+        this.store.cursor = cursor;
+        await this.store.save();
+        return newly;
     }
-    // --- set-online (control-interface.md §4.5, behavior.md §3.4) -------
-    async set_online(value) {
-        const wasOnline = this.online;
-        this.state.online = value;
-        let flushed = 0;
-        let received = [];
-        if (value && !wasOnline) {
-            // Genuine OFFLINE -> ONLINE transition: reconnect = flush then poll.
-            flushed = await this.flush();
-            received = await this.poll();
+    /**
+     * Persist connectivity; on an OFFLINE->ONLINE transition, reconnect.
+     *
+     * Reconnect is flush-then-poll (behavior.md §3.4). Idempotent: setting to a
+     * value already held is a no-op and runs neither flush nor poll
+     * (control-interface.md §4.5). Returns `[flushed, received]`.
+     */
+    async setOnline(online) {
+        this.requireIdentity();
+        const wasOnline = this.store.online;
+        if (online && !wasOnline) {
+            // Actual OFFLINE -> ONLINE transition: reconnect.
+            this.store.online = true;
+            await this.store.save();
+            const flushed = await this.flush();
+            const received = await this.poll();
+            return [flushed, received];
         }
-        return {
-            ok: true,
-            // Report the actual flag: flush/poll may have flipped it back to OFFLINE
-            // if the server turned out to be unreachable.
-            online: this.online,
-            flushed,
-            received,
-        };
-    }
-    // --- dump-state (control-interface.md §4.6) -------------------------
-    dump_state() {
-        return {
-            ok: true,
-            identity: this.state.identity,
-            online: this.online,
-            outbox: this.state.outbox.map((m) => ({
-                id: m.id,
-                to: m.to,
-                body: m.body,
-            })),
-            cursor: this.state.cursor,
-            displayed_ids: Array.from(this.state.displayed_ids),
-        };
+        // No transition (or going offline): just persist the flag.
+        this.store.online = online;
+        await this.store.save();
+        return [0, []];
     }
 }
 exports.Client = Client;

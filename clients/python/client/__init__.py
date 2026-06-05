@@ -1,8 +1,8 @@
 """Local messaging client (Python).
 
-Spec-driven client for the local messaging app. See the repository `spec/` for the
-source of truth: `protocol.md` (wire protocol), `behavior.md` (offline state
-machine), `control-interface.md` (CLI surface), `spec/platform/python.md`.
+A spec-driven, dependency-free client for the local messaging protocol. See
+``spec/protocol.md``, ``spec/behavior.md`` and ``spec/control-interface.md`` for
+the source of truth. Run as a module: ``python -m client ...``.
 """
 
 __all__ = ["protocol", "store", "core"]
