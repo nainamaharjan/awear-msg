@@ -1,0 +1,20 @@
+{
+  "name": "msg-client-typescript",
+  "version": "1.0.0",
+  "description": "Spec-driven TypeScript messaging client (generated from spec/).",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc"
+  },
+  "bin": {
+    "msg-client": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
+  }
+}

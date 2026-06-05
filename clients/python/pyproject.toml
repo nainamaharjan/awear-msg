@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awear-msg-client"
+version = "0.1.0"
+description = "Local messaging app client (Python). Generated from spec/."
+requires-python = ">=3.11"
+# No third-party runtime dependencies (spec/platform/python.md): stdlib only.
+dependencies = []
+
+[tool.setuptools]
+packages = ["client"]
