@@ -1,0 +1,39 @@
+The Python client is complete and verified. Here's my report.
+
+## Files created (all inside `clients/python/`)
+
+| File | Purpose |
+|------|---------|
+| `client/__init__.py` | Package marker / docstring |
+| `client/__main__.py` | `argparse` CLI, command dispatch, the single final-line JSON output, exit codes |
+| `client/protocol.py` | HTTP via `urllib` (`X-Protocol-Version: 1`); splits connection faults (`NetworkError` → OFFLINE) from server rejections (`ProtocolError`) |
+| `client/store.py` | JSON state at `--store`, written atomically (temp file + `os.replace`); `displayed_ids` as ordered list + set |
+| `client/core.py` | The offline state machine: `login`, `send`, `flush`, `poll`, `reconnect`, `set_online` |
+| `pyproject.toml` | Metadata, zero runtime deps, `requires-python >=3.11` |
+| `README.md` | Build/run commands + command table |
+
+Standard library only; no build step (per `spec/platform/python.md`).
+
+## Spec ambiguities / gaps (surfaced, not edited)
+
+1. **`behavior.md` vs `behaviour.md`** — CLAUDE.md and the prompt point to `spec/behavior.md`, but the actual file is `spec/behaviour.md` (British spelling). I read the existing file. The reference in CLAUDE.md should be reconciled with the filename.
+2. **`conformance/run.py` is absent** — CLAUDE.md §6 and the prompt ask to run `conformance/run.py` against `scenario_01.yaml`, but `conformance/` is empty (the scenario lives at `spec/conformance/scenario_01.yaml`). I couldn't run the official harness; instead I replayed all 15 scenario steps by hand (results below).
+3. **Non-network server errors during `flush` (e.g. a `400`)** — `behaviour.md §3.2` only specifies `202`/`200`/network-error. I treat a reachable-but-rejecting response as a `ProtocolError` that surfaces as `{"ok": false, ...}` and stops the flush *without* flipping to OFFLINE (the server was reachable). This shouldn't arise for well-formed messages.
+4. **`login`/`poll` with no identity** — specs don't say what happens if `poll`/`send` run before `login`. I return a structured `{"ok": false, "error": "no_identity"}` rather than crashing or inventing an empty identity.
+5. **`set-online true` when already ONLINE** — §4.5 says reconnect runs "on a transition to true." I treat already-online → online as a no-op (no flush/poll), reporting `flushed: 0, received: []`.
+
+## Verification — exactly what I ran
+
+Started `python3 server/app.py --port 8077` (port 8000 was already in use), then drove the client through the **entire `scenario_01.yaml` sequence** with separate `--store` files for alice and bob. **Every one of the 15 steps matched the expected JSON**, including:
+- online send/receive (`sent: true`, `cursor: 2`, bob→alice `delivery_seq 2`);
+- offline queueing (`sent: false`, `queued_remaining: 1`);
+- alice reconnect (`flushed: 1`, `received: []`, then `outbox: [], cursor: 2`);
+- bob reconnect (`flushed: 1`, receives m1+m3 in `delivery_seq` order 1,3; `cursor: 3`);
+- epilogue (alice receives m4 `delivery_seq 4`).
+
+Additional robustness checks, all passing:
+- **Re-poll same cursor** → `received: []` (exactly-once display via `displayed_ids`).
+- **Send/flush against a dead port** → no crash, `online` persisted to `false`, message stays in outbox in order.
+- **Failed `OFFLINE→ONLINE` reconnect** (dead server) → stays offline gracefully; then reconnecting to the live server flushes the queued message (`flushed: 1`).
+
+The only thing I could not run is the official `conformance/run.py` (it doesn't exist in the repo — gap #2 above).
