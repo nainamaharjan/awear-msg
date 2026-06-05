@@ -1,0 +1,114 @@
+# Conformance scenario: the 7-step Alice/Bob exchange.
+#
+# Consumed by conformance/run.py, which replays each step against a client under
+# test and asserts on the JSON the client prints (control-interface.md §3).
+# This file is SPEC: behavior questions are resolved here, not in client code.
+#
+# Message ids are runtime UUIDs, so assertions use stable facts only:
+#   from, to, body, server-assigned delivery_seq, outbox size, cursor.
+# delivery_seq is deterministic: a single monotonic counter incremented in the
+# order POSTs reach the server (protocol.md §5). Send order here is
+# m1, m2, m3, m4  ->  seq 1, 2, 3, 4.
+
+name: scenario_01_alice_bob
+description: >
+  Two users exchange messages online, then each queues a message while offline,
+  then reconnect at different times. Verifies no loss, exactly-once display,
+  per-sender ordering, and the flush-then-poll reconnect sequence.
+
+clients:
+  alice: { store: alice }   # each client gets an isolated --store
+  bob:   { store: bob }
+
+# Named message bodies, for readability and assertion reuse.
+messages:
+  m1: { from: alice, to: bob,   body: "Hi Bob, I have something important to tell you" }
+  m2: { from: bob,   to: alice, body: "What is it?" }
+  m3: { from: alice, to: bob,   body: "I'm getting promoted to lead the lab" }
+  m4: { from: bob,   to: alice, body: "Tell me the moment you can" }
+
+steps:
+
+  # --- setup: both log in while online -------------------------------------
+  - { actor: alice, cmd: login, args: [alice], expect: { ok: true, user: alice } }
+  - { actor: bob,   cmd: login, args: [bob],   expect: { ok: true, user: bob } }
+
+  # --- scenario step 1: Alice -> Bob (online) ------------------------------
+  - actor: alice
+    cmd: send
+    args: [bob, "Hi Bob, I have something important to tell you"]
+    expect: { ok: true, sent: true, queued_remaining: 0 }
+
+  # --- scenario step 2: Bob -> Alice (online) ------------------------------
+  - actor: bob
+    cmd: send
+    args: [alice, "What is it?"]
+    expect: { ok: true, sent: true, queued_remaining: 0 }
+
+  # Alice polls and receives Bob's reply (online receive path).
+  - actor: alice
+    cmd: poll
+    expect:
+      ok: true
+      cursor: 2
+      received:
+        - { from: bob, body: "What is it?", delivery_seq: 2 }
+  # NOTE: Bob deliberately does NOT poll yet, so his reconnect poll in the last
+  # step is meaningful (he will receive m1 and m3 together).
+
+  # --- scenario step 3: Alice goes offline and queues a message ------------
+  - { actor: alice, cmd: set-online, args: [false], expect: { ok: true, online: false } }
+  - actor: alice
+    cmd: send
+    args: [bob, "I'm getting promoted to lead the lab"]
+    expect: { ok: true, sent: false, queued_remaining: 1 }
+
+  # --- scenario step 4: Bob goes offline and queues a message --------------
+  - { actor: bob, cmd: set-online, args: [false], expect: { ok: true, online: false } }
+  - actor: bob
+    cmd: send
+    args: [alice, "Tell me the moment you can"]
+    expect: { ok: true, sent: false, queued_remaining: 1 }
+
+  # --- scenario step 5: Alice reconnects; her queued message reaches server -
+  # Reconnect = flush then poll (behavior.md §3.4). m3 flushes (seq 3).
+  # Nothing new to receive: m4 is still in Bob's outbox, not on the server.
+  - actor: alice
+    cmd: set-online
+    args: [true]
+    expect: { ok: true, online: true, flushed: 1, received: [] }
+  - actor: alice
+    cmd: dump-state
+    expect: { ok: true, outbox: [], cursor: 2 }
+
+  # --- scenario step 6: Alice goes offline again ---------------------------
+  - { actor: alice, cmd: set-online, args: [false], expect: { ok: true, online: false } }
+
+  # --- scenario step 7: Bob reconnects -------------------------------------
+  # Flush delivers his queued m4 (seq 4); poll receives Alice's m1 and m3
+  # in delivery_seq order. This is the headline behavior of the assignment.
+  - actor: bob
+    cmd: set-online
+    args: [true]
+    expect:
+      ok: true
+      online: true
+      flushed: 1
+      received:
+        - { from: alice, body: "Hi Bob, I have something important to tell you", delivery_seq: 1 }
+        - { from: alice, body: "I'm getting promoted to lead the lab",          delivery_seq: 3 }
+  - actor: bob
+    cmd: dump-state
+    expect: { ok: true, outbox: [], cursor: 3 }
+
+  # --- epilogue: prove no message is ultimately lost -----------------------
+  # Alice finally comes back and receives Bob's queued m4.
+  - actor: alice
+    cmd: set-online
+    args: [true]
+    expect:
+      ok: true
+      online: true
+      flushed: 0
+      received:
+        - { from: bob, body: "Tell me the moment you can", delivery_seq: 4 }
