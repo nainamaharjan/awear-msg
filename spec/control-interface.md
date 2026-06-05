@@ -48,6 +48,11 @@ moves on. Connectivity is therefore part of persisted state, not an in-memory fl
 
 ## 4. Commands
 
+**Identity precondition:** every command except `login` requires an established
+identity. If `send`, `flush`, `poll`, or `set-online` is run before `login`, the
+client MUST fail cleanly: output `{"ok": false, "error": "no_identity", "detail":
+"..."}` and exit non-zero. It MUST NOT invent an identity or crash.
+
 ### 4.1 `login <name>`
 Set `identity`. If ONLINE, `POST /session`.
 Output: `{"ok": true, "user": "<name>"}`
@@ -74,6 +79,10 @@ sequence (flush, then poll — behavior §3.4) and report its results.
 Output:
 `{"ok": true, "online": <bool>, "flushed": <int>, "received": [ ... ]}`
 - When set to `false`, `flushed`=0 and `received`=[].
+- Idempotent: `set-online true` while already ONLINE (and `set-online false` while
+  already OFFLINE) is a no-op — it does NOT flush or poll, and reports
+  `flushed: 0, received: []`. The reconnect sequence runs only on an actual
+  OFFLINE→ONLINE transition.
 
 ### 4.6 `dump-state`
 Read-only snapshot for assertions.

@@ -68,6 +68,11 @@ Process `outbox` oldest-first:
    succeeded; dropping it is correct.)
 3. On network error: transition to OFFLINE and **stop**. This message and all later
    ones remain in the outbox in their original order.
+4. On a non-network error response (the server is reachable but rejects the
+   message, e.g. a `400`): treat it as a protocol error — do **not** remove the
+   message from the outbox, do **not** transition to OFFLINE (the server is
+   reachable), surface the error, and stop the flush. For well-formed messages
+   this should not occur.
 
 `flush()` is idempotent and resumable — calling it repeatedly is safe and simply
 continues from the oldest remaining message.
