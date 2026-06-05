@@ -134,6 +134,12 @@ esac
 python conformance/run.py --client ".build/release/messaging-client" --client-dir clients/swift \
   --scenario spec/conformance/scenario_01.yaml
 ```
+To run as a client: 
+
+```bash
+swiftcarol() { clients/swift/.build/release/messaging-client --server http://localhost:8000 --store /tmp/carol.json "$@"; }
+rm -f /tmp/carol.json
+```
 
 The Swift client passes the same `scenario_01.yaml` (15/15) and interoperates with
 the Python and TypeScript clients through the server — confirming that the spec, not
