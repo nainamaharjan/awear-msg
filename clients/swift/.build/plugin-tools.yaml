@@ -1,0 +1,66 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<messaging-client-arm64-apple-macosx26.0-release.exe>","<messaging-client-arm64-apple-macosx26.0-release.module>"]
+  "messaging-client-arm64-apple-macosx26.0-release.exe": ["<messaging-client-arm64-apple-macosx26.0-release.exe>"]
+  "messaging-client-arm64-apple-macosx26.0-release.module": ["<messaging-client-arm64-apple-macosx26.0-release.module>"]
+  "test": ["<messaging-client-arm64-apple-macosx26.0-release.exe>","<messaging-client-arm64-apple-macosx26.0-release.module>"]
+default: "main"
+nodes:
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swift.o"]
+    outputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client.product/Objects.LinkFileList"
+
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Core.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Protocol.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Store.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/main.swift"]
+    outputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/sources"]
+    description: "Write auxiliary file /Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/sources"
+
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"
+
+  "<messaging-client-arm64-apple-macosx26.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client"]
+    outputs: ["<messaging-client-arm64-apple-macosx26.0-release.exe>"]
+
+  "<messaging-client-arm64-apple-macosx26.0-release.module>":
+    tool: phony
+    inputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/Modules/messaging_client.swiftmodule"]
+    outputs: ["<messaging-client-arm64-apple-macosx26.0-release.module>"]
+
+  "C.messaging-client-arm64-apple-macosx26.0-release.exe":
+    tool: shell
+    inputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client.product/Objects.LinkFileList"]
+    outputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client"]
+    description: "Linking ./.build/arm64-apple-macosx/release/messaging-client"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release","-o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client","-module-name","messaging_client","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_messaging_client_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging-client.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.5/macosx","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx10.13","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.messaging-client-arm64-apple-macosx26.0-release.module":
+    tool: shell
+    inputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Core.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Protocol.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Store.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/main.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/sources"]
+    outputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swift.o","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/Modules/messaging_client.swiftmodule"]
+    description: "Compiling Swift Module 'messaging_client' (4 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","messaging_client","-emit-dependencies","-emit-module","-emit-module-path","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/Modules/messaging_client.swiftmodule","-output-file-map","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/output-file-map.json","-whole-module-optimization","-num-threads","12","-c","@/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/sources","-I","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx10.13","-whole-module-optimization","-num-threads","12","-serialize-diagnostics","-O","-j12","-DSWIFT_PACKAGE","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","messaging_client_main","-color-diagnostics","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","swift"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Package.swift","/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

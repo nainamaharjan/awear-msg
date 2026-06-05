@@ -1,0 +1,31 @@
+{
+  "": {
+    "dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/messaging_client.d",
+    "object": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/messaging_client.o",
+    "swift-dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/master.swiftdeps"
+  },
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Core.swift": {
+    "object": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swift.o",
+    "swiftmodule": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core~partial.swiftmodule",
+    "swift-dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.swiftdeps",
+    "diagnostics": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Core.dia"
+  },
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Protocol.swift": {
+    "object": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swift.o",
+    "swiftmodule": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol~partial.swiftmodule",
+    "swift-dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.swiftdeps",
+    "diagnostics": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Protocol.dia"
+  },
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/Store.swift": {
+    "object": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swift.o",
+    "swiftmodule": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store~partial.swiftmodule",
+    "swift-dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.swiftdeps",
+    "diagnostics": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/Store.dia"
+  },
+  "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/Sources/messaging-client/main.swift": {
+    "object": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swift.o",
+    "swiftmodule": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.swiftdeps",
+    "diagnostics": "/Users/nainamaharjan/Desktop/awear-msg/clients/swift/.build/arm64-apple-macosx/release/messaging_client.build/main.dia"
+  }
+}
