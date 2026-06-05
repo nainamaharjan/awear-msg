@@ -8,7 +8,9 @@ TypeScript/Node does it*.
 ## Runtime & dependencies
 - Node.js 20+, TypeScript 5+.
 - **No third-party runtime dependencies.** Use built-in `fetch`, `node:crypto`,
-  `node:fs/promises`, `node:util`. `typescript` is the only dev dependency.
+  `node:fs/promises`, `node:util`. Dev dependencies are `typescript` and
+  `@types/node` (the latter is type-only — it ships no runtime code, so the
+  no-runtime-dependency rule still holds).
 
 ## Project layout & entrypoint
 - A package under `clients/typescript/` compiled from `src/` to `dist/`.

@@ -44,6 +44,9 @@ moves on. Connectivity is therefore part of persisted state, not an in-memory fl
 - It MUST contain at least `{"ok": <bool>}`.
 - On error: `{"ok": false, "error": "<short_code>", "detail": "<text>"}` and a
   non-zero exit code.
+- Unexpected/unhandled errors MUST still produce a structured failure with error
+  code `internal_error` (never an unstructured crash or stack trace as the final
+  line).
 - Any other stdout (logs, etc.) MUST precede that final line. stderr is unconstrained.
 
 ## 4. Commands
@@ -85,7 +88,8 @@ Output:
   OFFLINE→ONLINE transition.
 
 ### 4.6 `dump-state`
-Read-only snapshot for assertions.
+Read-only snapshot for assertions. Purely local: it does NOT contact the server,
+so `--server` is optional for this command only (all other commands require it).
 Output:
 ```
 {"ok": true,
