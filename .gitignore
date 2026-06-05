@@ -1,0 +1,6 @@
+clients/
+__pycache__/
+node_modules/
+*.db
+.cursor
+.outbox
