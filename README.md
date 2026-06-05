@@ -62,6 +62,7 @@ Delete the generated clients and rebuild them purely from the spec:
 rm -rf clients/python clients/typescript
 ./harness/generate.sh all
 ( cd clients/typescript && npm install && npm run build )
+cd ..
 python conformance/run.py --client "python -m client" --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
 python conformance/run.py --client "node dist/cli.js" --client-dir clients/typescript \
