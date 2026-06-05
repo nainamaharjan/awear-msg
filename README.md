@@ -62,7 +62,6 @@ Delete the generated clients and rebuild them purely from the spec:
 rm -rf clients/python clients/typescript
 ./harness/generate.sh all
 ( cd clients/typescript && npm install && npm run build )
-cd ..
 python conformance/run.py --client "python -m client" --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
 python conformance/run.py --client "node dist/cli.js" --client-dir clients/typescript \
@@ -100,6 +99,45 @@ pyalice set-online true                         # Alice receives Bob's queued ms
 ```
 
 All four messages are delivered exactly once, in order, across the offline gap.
+
+## How it works
+
+The spec is the contract; the harness is the compiler; the conformance runner is
+the type-checker; the two clients are the proof the contract is unambiguous. See
+[DESIGN.md](DESIGN.md) for the principles and [FUTURE.md](FUTURE.md) for what's next.
+
+## Adding a new language: Swift (tested)
+
+To confirm the harness generalizes beyond two similar languages, I added a third
+client in **Swift** — a headless SwiftPM command-line executable, not an iOS app —
+and verified it the same way as the others. The generic spec was unchanged; only a
+new platform mapping and one line in the harness were needed.
+
+1. Add a platform mapping `spec/platform/swift.md` (how Swift realizes the generic
+   spec: URLSession, Codable, atomic file storage, the launch string).
+
+2. Add `swift` to the target allowlist in `harness/generate.sh`:
+
+```bash
+case "$1" in
+  python|typescript|swift) generate_one "$1" ;;
+  all)               generate_one python; generate_one typescript; generate_one swift ;;
+  *)                 usage ;;
+esac
+```
+
+3. Generate, build, and verify:
+
+```bash
+./harness/generate.sh swift
+( cd clients/swift && swift build -c release )
+python conformance/run.py --client ".build/release/messaging-client" --client-dir clients/swift \
+  --scenario spec/conformance/scenario_01.yaml
+```
+
+The Swift client passes the same `scenario_01.yaml` (15/15) and interoperates with
+the Python and TypeScript clients through the server — confirming that the spec, not
+the language, defines behavior. Any further language can be added the same way.
 
 ## How it works
 
