@@ -46,7 +46,9 @@ python server/app.py --port 8000
 # 3. grade each client against the spec's conformance scenario
 pip install pyyaml
 
-( cd clients/typescript && npm install && npm run build )
+cd clients/typescript && npm install && npm run build 
+
+cd ../..  
 
 python conformance/run.py --client "python -m client"  --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
@@ -66,7 +68,9 @@ rm -rf clients/python clients/typescript
 
 ./harness/generate.sh all
 
-( cd clients/typescript && npm install && npm run build )
+cd clients/typescript && npm install && npm run build
+
+cd ../..  
 
 python conformance/run.py --client "python -m client" --client-dir clients/python \
   --scenario spec/conformance/scenario_01.yaml
@@ -85,7 +89,9 @@ clients interoperate through the server (Python Alice ↔ TypeScript Bob):
 ```bash
 python server/app.py --port 8000 &
 
-( cd clients/typescript && npm install && npm run build )
+cd clients/typescript && npm install && npm run build 
+
+cd ../..  
 
 pyalice() { env PYTHONPATH=clients/python python -m client --server http://localhost:8000 --store /tmp/alice.json "$@"; }
 
@@ -142,7 +148,9 @@ esac
 ```bash
 ./harness/generate.sh swift
 
-( cd clients/swift && swift build -c release )
+cd clients/swift && swift build -c release
+
+cd ../..  
 
 python conformance/run.py --client ".build/release/messaging-client" --client-dir clients/swift \
   --scenario spec/conformance/scenario_01.yaml
